@@ -1,6 +1,8 @@
 package org.jboss.arquillian.jbehave.javassist;
 
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 import javassist.CannotCompileException;
 import javassist.ClassPool;
@@ -21,6 +23,8 @@ import javassist.bytecode.ConstPool;
  */
 public class CopyClass {
 
+	private static Map<String, Class<?>> cache = new HashMap<>();
+	
 	public static <T> Class<T> copy(Class<T> source) {
 		try {
 			CtClass ctDestination = ClassPool.getDefault().makeClass(source.getName() + "Copycat");
@@ -81,9 +85,13 @@ public class CopyClass {
 		if (base.getName().endsWith("CopycatMerge")) {
 			return base;
 		}
+		String newClassName = base.getName() + "CopycatMerge";
+		if (cache.containsKey(newClassName)) {
+			return (Class<T>)cache.get(newClassName);
+		}
 		try {
 			ctBase = ClassPool.getDefault().get(base.getName());
-			CtClass ctDestination = ClassPool.getDefault().makeClass(base.getName() + "CopycatMerge", ctBase);
+			CtClass ctDestination = ClassPool.getDefault().makeClass(newClassName, ctBase);
 			ConstPool cp = ctDestination.getClassFile().getConstPool();
 			for (Class<?> tClass : toMerge) {
 				copy(ClassPool.getDefault().get(tClass.getName()), ctDestination);
@@ -101,7 +109,12 @@ public class CopyClass {
 			}
 			ctDestination.writeFile("__temp");
 			ClassPool.getDefault().insertClassPath("__temp");
-			return ctDestination.toClass();
+			//inject the newly created class in the class loader
+			Thread.currentThread().setContextClassLoader(
+					new ExclusionLoader(Thread.currentThread().getContextClassLoader(), ClassPool.getDefault(),
+							newClassName));
+			cache.put(newClassName, ctDestination.toClass());
+			return (Class<T>)cache.get(newClassName);
 		} catch (NotFoundException e) {
 			e.printStackTrace();
 			return null;
