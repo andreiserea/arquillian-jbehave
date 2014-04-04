@@ -3,9 +3,9 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.jboss.arquillian</groupId>
 	<artifactId>arquillian-jbehave</artifactId>
-
+	<version>1.1-beta</version>
 	<properties>
-		<jbehave.version>3.8-Arquillian</jbehave.version>
+		<jbehave.version>3.8-Arquillian-v1.1-beta</jbehave.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -104,5 +104,4 @@
 			</plugin>
 		</plugins>
 	</build>
-	<version>1.0.0</version>
 </project>
