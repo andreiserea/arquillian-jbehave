@@ -18,11 +18,10 @@ package org.jboss.arquillian.jbehave.client;
 
 import org.jboss.arquillian.container.test.spi.client.deployment.AuxiliaryArchiveAppender;
 import org.jboss.arquillian.core.spi.LoadableExtension;
-import org.jboss.arquillian.jbehave.injection.StepEnricherProvider;
 
 
 /**
- * A version of the LoadableExtension with JBehave loaded from Maven pom file (for cases when JBehave is
+ * A version of the LoadableExtension without JBehave (for cases when JBehave is
  * set up as a global module in jboss, to speed up deployment time)
  * 
  * @author Andrei Serea
@@ -32,9 +31,8 @@ public class ShrinkedJBehaveExtension implements LoadableExtension {
 
 	@Override
 	public void register(ExtensionBuilder builder) {
-		builder.service(AuxiliaryArchiveAppender.class, JBehaveCoreMavenDeploymentAppender.class)
-				.service(AuxiliaryArchiveAppender.class, ArquillianJBehaveRunnerDeploymentAppender.class)
-				.observer(StepEnricherProvider.class);
+		builder.service(AuxiliaryArchiveAppender.class, ArquillianJBehaveRunnerDeploymentAppender.class)
+				.observer(JBehaveProgressNotifierClient.class);
 	}
 
 }

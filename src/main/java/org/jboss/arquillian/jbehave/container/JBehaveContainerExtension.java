@@ -19,20 +19,17 @@ package org.jboss.arquillian.jbehave.container;
 import org.jboss.arquillian.container.test.spi.RemoteLoadableExtension;
 import org.jboss.arquillian.jbehave.injection.StepEnricherProvider;
 
-
 /**
  * Arquillian extension for JBehave that executes remotely in-container.
  * 
  * @author Vineet Reynolds
- *
+ * 
  */
-public class JBehaveContainerExtension implements RemoteLoadableExtension
-{
+public class JBehaveContainerExtension implements RemoteLoadableExtension {
 
-   @Override
-   public void register(ExtensionBuilder builder)
-   {
-      builder.observer(StepEnricherProvider.class);
-   }
+	@Override
+	public void register(ExtensionBuilder builder) {
+		builder.observer(StepEnricherProvider.class);
+	}
 
 }

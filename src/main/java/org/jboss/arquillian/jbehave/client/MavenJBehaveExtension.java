@@ -22,8 +22,7 @@ import org.jboss.arquillian.jbehave.injection.StepEnricherProvider;
 
 
 /**
- * A version of the LoadableExtension without JBehave (for cases when JBehave is
- * set up as a global module in jboss, to speed up deployment time)
+ * A version of the LoadableExtension with JBehave loaded from Maven pom file 
  * 
  * @author Andrei Serea
  * 
@@ -32,7 +31,8 @@ public class MavenJBehaveExtension implements LoadableExtension {
 
 	@Override
 	public void register(ExtensionBuilder builder) {
-		builder.service(AuxiliaryArchiveAppender.class, ArquillianJBehaveRunnerDeploymentAppender.class)
+		builder.service(AuxiliaryArchiveAppender.class, JBehaveCoreMavenDeploymentAppender.class)
+				.service(AuxiliaryArchiveAppender.class, ArquillianJBehaveRunnerDeploymentAppender.class)
 				.observer(StepEnricherProvider.class);
 	}
 

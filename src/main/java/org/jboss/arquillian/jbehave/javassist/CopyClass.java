@@ -1,6 +1,8 @@
 package org.jboss.arquillian.jbehave.javassist;
 
 import java.io.IOException;
+import java.lang.reflect.Array;
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -49,19 +51,19 @@ public class CopyClass {
 		}
 	}
 
-	private static void copy(CtClass ctSource, CtClass ctDestination) {
+	private static void copy(CtClass ctSource, CtClass ctDestination, boolean prefix) {
 		try {
 			// copy fields
 			ConstPool cp = ctDestination.getClassFile().getConstPool();
 			for (CtField f : ctSource.getDeclaredFields()) {
 				CtClass fieldTypeClass = ClassPool.getDefault().get(f.getType().getName());
-				CtField ctField = new CtField(fieldTypeClass, f.getName(), ctDestination);
+				CtField ctField = new CtField(fieldTypeClass, (prefix ? ctSource.getSimpleName() + "_" : "") + f.getName(), ctDestination);
 				ctDestination.addField(ctField);
 			}
 			// copy methods
 			for (CtMethod m : ctSource.getDeclaredMethods()) {
 				//copy the method prefixing it with the source class name
-				CtMethod newm = CtNewMethod.copy(m, /*ctSource.getSimpleName() + "_" + */m.getName(), ctDestination, null);
+				CtMethod newm = CtNewMethod.copy(m, (prefix ? ctSource.getSimpleName() + "_" : "") + m.getName(), ctDestination, null);
 				// with annotations
 				AnnotationsAttribute invAnn = (AnnotationsAttribute) m.getMethodInfo().getAttribute(
 						AnnotationsAttribute.invisibleTag);
@@ -94,7 +96,7 @@ public class CopyClass {
 			CtClass ctDestination = ClassPool.getDefault().makeClass(newClassName, ctBase);
 			ConstPool cp = ctDestination.getClassFile().getConstPool();
 			for (Class<?> tClass : toMerge) {
-				copy(ClassPool.getDefault().get(tClass.getName()), ctDestination);
+				copy(ClassPool.getDefault().get(tClass.getName()), ctDestination, true);
 			}
 			// copy annotations from class level too
 			AnnotationsAttribute invAnn = (AnnotationsAttribute) ctBase.getClassFile().getAttribute(
@@ -131,7 +133,7 @@ public class CopyClass {
 		try {
 			CtClass ctDestination = ClassPool.getDefault().makeClass("CopycatMerge");
 			for (Class<?> tClass : toMerge) {
-				copy(ClassPool.getDefault().get(tClass.getName()), ctDestination);
+				copy(ClassPool.getDefault().get(tClass.getName()), ctDestination, true);
 			}
 			return ctDestination.toClass();
 		} catch (NotFoundException e) {
@@ -140,6 +142,13 @@ public class CopyClass {
 		} catch (CannotCompileException e) {
 			e.printStackTrace();
 			return null;
+		}
+	}
+	
+	public static void main(String args[]) {
+		Class<CopyClass> clazz = mergeClassesToNewClassWithBase(CopyClass.class, Array.class);
+		for (Method m : clazz.getMethods()) {
+			System.out.println(m.getName());
 		}
 	}
 }

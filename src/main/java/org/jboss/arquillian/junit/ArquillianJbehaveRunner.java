@@ -1,36 +1,48 @@
 package org.jboss.arquillian.junit;
 
+import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import javax.management.JMX;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+
 import org.jbehave.core.ConfigurableEmbedder;
 import org.jbehave.core.configuration.Configuration;
 import org.jbehave.core.embedder.Embedder;
-import org.jbehave.core.embedder.EmbedderControls;
 import org.jbehave.core.embedder.NullEmbedderMonitor;
 import org.jbehave.core.embedder.StoryRunner;
+import org.jbehave.core.failures.BeforeOrAfterFailed;
 import org.jbehave.core.failures.UUIDExceptionWrapper;
 import org.jbehave.core.io.StoryPathResolver;
 import org.jbehave.core.junit.JUnitStories;
 import org.jbehave.core.junit.JUnitStory;
 import org.jbehave.core.model.Story;
 import org.jbehave.core.reporters.Format;
+import org.jbehave.core.reporters.NullStoryReporter;
+import org.jbehave.core.reporters.StoryReporter;
 import org.jbehave.core.reporters.StoryReporterBuilder;
 import org.jbehave.core.steps.AbstractStepResult;
 import org.jbehave.core.steps.CandidateSteps;
 import org.jbehave.core.steps.InjectableStepsFactory;
 import org.jbehave.core.steps.NullStepMonitor;
 import org.jbehave.core.steps.Step;
+import org.jbehave.core.steps.StepCreator.BeforeOrAfterStep;
 import org.jbehave.core.steps.StepCreator.ParameterisedStep;
 import org.jbehave.core.steps.StepCreator.PendingStep;
 import org.jbehave.core.steps.StepCreator.ScenarioStep;
 import org.jbehave.core.steps.StepExecutor;
+import org.jbehave.core.steps.StepIndex;
 import org.jbehave.core.steps.StepLifecycleObserver;
 import org.jbehave.core.steps.StepMonitor;
 import org.jbehave.core.steps.StepResult;
+import org.jboss.arquillian.jbehave.ExtendedState;
+import org.jboss.arquillian.jbehave.container.JBehaveProgressNotifier;
+import org.jboss.arquillian.jbehave.container.JBehaveProgressNotifierMXBean;
 import org.jboss.arquillian.jbehave.injection.ArquillianInstanceStepsFactory;
 import org.jboss.arquillian.jbehave.javassist.CopyClass;
 import org.jboss.arquillian.test.spi.TestMethodExecutor;
@@ -43,6 +55,7 @@ import org.junit.runners.model.FrameworkMethod;
 import org.junit.runners.model.Statement;
 
 import de.codecentric.jbehave.junit.monitoring.JUnitDescriptionGenerator;
+import de.codecentric.jbehave.junit.monitoring.JUnitScenarioReporter;
 
 /**
  * Arquillian runner that is capable of running a ConfigurableEmbedder inside the container. In other words, it runs the
@@ -54,20 +67,24 @@ import de.codecentric.jbehave.junit.monitoring.JUnitDescriptionGenerator;
 public class ArquillianJbehaveRunner extends Arquillian {
 
 	private List<Description> storyDescriptions;
-	private Embedder configuredEmbedder;
-	private static List<String> storyPaths;
-	private Configuration configuration;
+	protected Embedder configuredEmbedder;
+	protected static List<String> storyPaths;
+	protected Configuration configuration;
 	private int numberOfTestCases;
 	private Description rootDescription;
 	List<CandidateSteps> candidateSteps;
 	private ConfigurableEmbedder configurableEmbedder;
 	protected static Object testClassInstance = null;
 	private static StoryRunner.State crrState = null;
-	private static Step previousStep = null;
 	protected static boolean isRunningRemote = false;
 	private boolean shouldExecuteCrrStep = false;
 	private static Step remoteExecutedStep = null;
 	private static boolean firstTime = true;
+	/**
+	 * Stores in the container the index of the next step to run
+	 */
+	private StepIndex stepToRun;
+	
 
 	public ArquillianJbehaveRunner(Class<? extends ConfigurableEmbedder> testClass) throws Throwable {
 		super(CopyClass.mergeClassesToNewClassWithBase(testClass, ((ArquillianInstanceStepsFactory) testClass
@@ -86,6 +103,8 @@ public class ArquillianJbehaveRunner extends Arquillian {
 				getStoryPathsFromJUnitStory();
 			}
 		}
+		// set the story paths properties in the extended state 
+		ExtendedState.setProperty(ExtendedState.STORY_PATHS, storyPaths);
 
 		configuration = configuredEmbedder.configuration();
 		configuration.useStepLifecycleObserver(new JUnitStepLifecycleObserver());
@@ -102,6 +121,19 @@ public class ArquillianJbehaveRunner extends Arquillian {
 		// don't print anything on the console inside the container
 		if (isRunningRemote) {
 			configuredEmbedder.useEmbedderMonitor(new NullEmbedderMonitor());
+			configuration.storyReporterBuilder().formats().remove(Format.CONSOLE);
+		}
+//		// initialize the proxy to the JBehaveProgressNotifierMBean in the local JUnit process
+//		if (!isRunningRemote) {
+//			// TODO: change with info from arquillian.properties
+//			JMXServiceURL u = new JMXServiceURL("service:jmx:remoting-jmx://localhost:9999");
+//			JMXConnector c = JMXConnectorFactory.connect(u, new HashMap<String, Object>());
+//			conn = c.getMBeanServerConnection();
+		if (isRunningRemote) {
+			MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
+			this.stepToRun = JMX.newMXBeanProxy(mbs,
+					new ObjectName(JBehaveProgressNotifier.JBEHAVE_PROGRESS_NOTIFIER_NAME),
+					JBehaveProgressNotifierMXBean.class).getNextStep();
 		}
 		remoteExecutedStep = null;
 		System.out.println("Init time: " + (System.currentTimeMillis() - startTime));
@@ -153,11 +185,12 @@ public class ArquillianJbehaveRunner extends Arquillian {
 		return new Statement() {
 			@Override
 			public void evaluate() {
-				ArquillianJbehaveJUnitScenarioReporter junitReporter = new ArquillianJbehaveJUnitScenarioReporter(
-						notifier, numberOfTestCases, rootDescription, configuration.keywords());
+				JUnitScenarioReporter junitReporter = new JUnitScenarioReporter(
+						notifier, numberOfTestCases, rootDescription, configuration.keywords(), false);
+				StateResetStoryReporter stateResetStoryReporter = new StateResetStoryReporter();
 				// tell the reporter how to handle pending steps
 				junitReporter.usePendingStepStrategy(configuration.pendingStepStrategy());
-				configureStoryReporterFormats(junitReporter);
+				configureStoryReporterFormats(junitReporter, stateResetStoryReporter);
 
 				try {
 					configuredEmbedder.runStoriesAsPaths(storyPaths);
@@ -168,16 +201,6 @@ public class ArquillianJbehaveRunner extends Arquillian {
 				}
 			}
 		};
-	}
-
-	public static EmbedderControls recommandedControls(Embedder embedder) {
-		return embedder.embedderControls()
-		// don't throw an exception on generating reports for failing stories
-				.doIgnoreFailureInView(true)
-				// don't throw an exception when a story failed
-				.doIgnoreFailureInStories(true)
-				// .doVerboseFailures(true)
-				.useThreads(1);
 	}
 
 	private void createCandidateStepsWith(StepMonitor stepMonitor) {
@@ -239,15 +262,13 @@ public class ArquillianJbehaveRunner extends Arquillian {
 		rootDescription.getChildren().addAll(storyDescriptions);
 	}
 
-	private void configureStoryReporterFormats(ArquillianJbehaveJUnitScenarioReporter junitReporter) {
+	protected void configureStoryReporterFormats(StoryReporter ... storyReporters) {
 		StoryReporterBuilder storyReporterBuilder = configuration.storyReporterBuilder();
-		StoryReporterBuilder.ProvidedFormat junitReportFormat = new StoryReporterBuilder.ProvidedFormat(junitReporter);
-		storyReporterBuilder.withFormats(junitReportFormat);
-		// remove the console reporter for the container
-		if (isRunningRemote) {
-			storyReporterBuilder.formats().remove(Format.CONSOLE);
+		List<StoryReporterBuilder.ProvidedFormat> formats = new ArrayList<>();
+		for(StoryReporter storyReporter : storyReporters) {
+			formats.add(new StoryReporterBuilder.ProvidedFormat(storyReporter));
 		}
-
+		storyReporterBuilder.withFormats(formats.toArray(new StoryReporterBuilder.ProvidedFormat[] {}));
 	}
 
 	private List<Description> buildDescriptionFromStories() {
@@ -295,6 +316,7 @@ public class ArquillianJbehaveRunner extends Arquillian {
 			final StoryRunner.State nextState = computedNextState;
 
 			final List<StoryRunner.State> result = new ArrayList<>();
+			ExtendedState.setProperty(ExtendedState.CRR_STEP, step);
 			try {
 				// report the beginning of the test to the storyreporter only if
 				// it is ran locally (otherwise it is done inside
@@ -308,7 +330,8 @@ public class ArquillianJbehaveRunner extends Arquillian {
 				final Method stepMethodClone = getTestClass().getJavaClass().getMethod(
 				/*
 				 * initialMethod.getDeclaringClass().getSimpleName() + "_" +
-				 */initialMethod.getName(), step.method().getParameterTypes());
+				 */initialMethod.getDeclaringClass().getSimpleName() + "_" + initialMethod.getName(),
+						step.method().getParameterTypes());
 				final TestResult jUnitResult = State.getTestAdaptor().test(new TestMethodExecutor() {
 					public void invoke(Object... parameters) throws Throwable {
 						result.add(nextState.run(step));
@@ -330,8 +353,18 @@ public class ArquillianJbehaveRunner extends Arquillian {
 					if (nextState instanceof StoryRunner.FineSoFar) {
 						// look at test result
 						if (jUnitResult.getStatus() == TestResult.Status.PASSED) {
-							AbstractStepResult.successful(step.stepAsString()).describeTo(
-									state.storyRunner().storyReporter());
+							StepResult stepResult = null;
+							if (step instanceof BeforeOrAfterStep) {
+								stepResult = AbstractStepResult.skipped();
+							} else if (step instanceof ScenarioStep) {
+								stepResult = AbstractStepResult.successful(step.stepAsString());
+							}
+							if (stepResult != null) {
+								stepResult.describeTo(state.storyRunner().storyReporter());
+							} else {
+								System.err.println("step of unexpected type: " + step.getClass().getName());
+							}
+
 							crrState = nextState;
 						} else if (jUnitResult.getStatus() == TestResult.Status.SKIPPED) {
 							// this is a pending step
@@ -341,10 +374,19 @@ public class ArquillianJbehaveRunner extends Arquillian {
 						} else if (jUnitResult.getStatus() == TestResult.Status.FAILED) {
 							// failed, must return new state - something
 							// happened
-							UUIDExceptionWrapper exWrapper = new UUIDExceptionWrapper(step.stepAsString(),
-									jUnitResult.getThrowable());
-							AbstractStepResult.failed(step.stepAsString(), exWrapper).describeTo(
-									state.storyRunner().storyReporter());
+							UUIDExceptionWrapper exWrapper = null;
+							if (step instanceof BeforeOrAfterStep) {
+								exWrapper = new UUIDExceptionWrapper(new BeforeOrAfterFailed(
+										((BeforeOrAfterStep) step).method(), jUnitResult.getThrowable()));
+								AbstractStepResult.failed(((BeforeOrAfterStep) step).method(), exWrapper)
+										.describeTo(state.storyRunner().storyReporter());
+							} else if (step instanceof ScenarioStep) {
+								exWrapper = new UUIDExceptionWrapper(step.stepAsString(), jUnitResult.getThrowable());
+								AbstractStepResult.failed(step.stepAsString(), exWrapper).describeTo(
+										state.storyRunner().storyReporter());
+							} else {
+								System.err.println("step of unexpected type: " + step.getClass().getName());
+							}
 							crrState = state.storyRunner().new SomethingHappened(exWrapper);
 						}
 					} else if (nextState instanceof StoryRunner.SomethingHappened) {
@@ -377,7 +419,8 @@ public class ArquillianJbehaveRunner extends Arquillian {
 				Method stepMethodClone = getTestClass().getJavaClass().getMethod(
 				/*
 				 * initialMethod.getDeclaringClass().getSimpleName() + "_" +
-				 */initialMethod.getName(), step.method().getParameterTypes());
+				 */initialMethod.getDeclaringClass().getSimpleName() + "_" + initialMethod.getName(),
+						step.method().getParameterTypes());
 				final FrameworkMethod method = new FrameworkMethod(stepMethodClone);
 				ArquillianJbehaveRunner.this.withBefores(method, testClassInstance, new EmptyStatement()).evaluate();
 
@@ -395,14 +438,13 @@ public class ArquillianJbehaveRunner extends Arquillian {
 				Method stepMethodClone = getTestClass().getJavaClass().getMethod(
 				/*
 				 * initialMethod.getDeclaringClass().getSimpleName() + "_" +
-				 */initialMethod.getName(), step.method().getParameterTypes());
+				 */initialMethod.getDeclaringClass().getSimpleName() + "_" + initialMethod.getName(),
+						step.method().getParameterTypes());
 				final FrameworkMethod method = new FrameworkMethod(stepMethodClone);
 				ArquillianJbehaveRunner.this.withAfters(method, testClassInstance, new EmptyStatement()).evaluate();
 			} catch (Throwable e) {
 				e.printStackTrace();
 			} finally {
-				// remember this step as the last step executed
-				previousStep = step;
 				remoteExecutedStep = step;
 			}
 		}
@@ -432,52 +474,25 @@ public class ArquillianJbehaveRunner extends Arquillian {
 		// executed in case it wasn't pending
 		// this is needed to keep the track of running progress (successfully
 		// executing other scenarios after previous one got pending steps)
-		if (step instanceof PendingStep) {
-			if (previousStep == null || ((ScenarioStep) step).follows((ScenarioStep) previousStep, storyPaths)) {
-				// mark it as executed but return false to actually skip
-				// execution
-				previousStep = step;
-				// this prevents execution in remote of more then one step at a
-				// time
-				remoteExecutedStep = step;
-				// execute the step only outside the container to update the
-				// scenario progress inside the container
-				return !isRunningRemote;
-			}
-		} else {
+		if (step instanceof PendingStep && ((PendingStep) step).index(storyPaths).equals(stepToRun)) {
+			// mark it as executed but return false to actually skip
+			// execution - this prevents execution in remote of more then one step at a time
+			remoteExecutedStep = step;
+			return false;
+		} else if (step instanceof ScenarioStep && ((ScenarioStep) step).index(storyPaths).equals(stepToRun)) {
+			return true;
+		} else if (step instanceof BeforeOrAfterStep) {
 			Method m = step.method();
 			assert m != null;
 			Description testClassDescription = super.getDescription();
 			for (Description d : testClassDescription.getChildren()) {
-				if (d.getMethodName() != null && d.getMethodName().equals(m.getName())) {
-					// if methods match, check if it is the right jbehave step,
-					// based on previous step (if not null)
-					if (previousStep != null) {
-						assert step instanceof ScenarioStep;
-						return ((ScenarioStep) step).follows((ScenarioStep) previousStep, storyPaths);
-					}
+				if (d.getMethodName() != null
+						&& d.getMethodName().equals(m.getDeclaringClass().getSimpleName() + "_" + m.getName())) {
 					return true;
 				}
 			}
 		}
 		return false;
-	}
-
-	/**
-	 * Reset the crrState after each scenario
-	 */
-	public static void afterScenario() {
-		// in container, reset the state of jbehave runner only if the last step
-		// of the scenario was executed
-		// locally, jbehave handles this
-		if (remoteExecutedStep != null) {
-			assert remoteExecutedStep instanceof ScenarioStep;
-			List<String> steps = ((ScenarioStep) remoteExecutedStep).getScenario().getSteps();
-			int remoteExecutedStepIndex = steps.indexOf(remoteExecutedStep.stepAsString());
-			if (remoteExecutedStepIndex == steps.size() - 1) {
-				crrState = null;
-			}
-		}
 	}
 
 	/**
@@ -501,5 +516,23 @@ public class ArquillianJbehaveRunner extends Arquillian {
 		} else {
 			return oldState;
 		}
+	}
+	
+	private class StateResetStoryReporter extends NullStoryReporter {
+		/**
+		 * Reset the crrState after each scenario
+		 */
+		@Override
+	    public void afterScenario() {
+			// in container, reset the state of jbehave runner only if the last step
+			// of the scenario was executed
+			// locally, jbehave handles this
+			if (remoteExecutedStep != null) {
+				assert remoteExecutedStep instanceof ScenarioStep;
+				if (((ScenarioStep)remoteExecutedStep).isLastInScenario()) {
+					crrState = null;
+				}
+			}
+	    }
 	}
 }

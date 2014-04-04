@@ -1,1 +1,1 @@
-org.jboss.arquillian.jbehave.client.MavenJBehaveExtension
+org.jboss.arquillian.jbehave.client.ShrinkedJBehaveExtension
