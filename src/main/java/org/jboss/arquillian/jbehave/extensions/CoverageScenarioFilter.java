@@ -51,6 +51,8 @@ public class CoverageScenarioFilter implements ScenarioFilter {
 			if (unmodifiedScenarios != null && unmodifiedScenarios.contains(scenarioId)) {
 				logger.info("Skipping scenario " + scenario.getTitle());
 				return false;
+			} else {
+				logger.info("Executing scenario " + scenario.getTitle());
 			}
 		}
 		// if no test plan exists (first run) or running remote allow all scenarios to run
