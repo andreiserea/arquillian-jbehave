@@ -11,6 +11,7 @@ import javax.management.JMX;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
+import org.apache.log4j.Logger;
 import org.jbehave.core.ConfigurableEmbedder;
 import org.jbehave.core.configuration.Configuration;
 import org.jbehave.core.embedder.Embedder;
@@ -66,6 +67,8 @@ import de.codecentric.jbehave.junit.monitoring.JUnitScenarioReporter;
  */
 public class ArquillianJbehaveRunner extends Arquillian {
 
+	private static final Logger logger = Logger.getLogger(ArquillianJbehaveRunner.class);
+	
 	private List<Description> storyDescriptions;
 	protected Embedder configuredEmbedder;
 	protected static List<String> storyPaths;
@@ -528,7 +531,7 @@ public class ArquillianJbehaveRunner extends Arquillian {
 			// of the scenario was executed
 			// locally, jbehave handles this
 			if (remoteExecutedStep != null) {
-				assert remoteExecutedStep instanceof ScenarioStep;
+				logger.info("After scenario: last method was " + remoteExecutedStep.method().toGenericString());
 				if (((ScenarioStep)remoteExecutedStep).isLastInScenario()) {
 					crrState = null;
 				}
