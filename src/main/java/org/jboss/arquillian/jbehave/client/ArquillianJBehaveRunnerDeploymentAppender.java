@@ -37,7 +37,7 @@ public class ArquillianJBehaveRunnerDeploymentAppender implements AuxiliaryArchi
 				.addClass(ExtendedState.class);
 		archive.addAsServiceProvider(RemoteLoadableExtension.class, JBehaveContainerExtension.class);
 		//TODO: fix this - do not add ArquillianService, make below line append instead of replace
-		archive.addAsServiceProvider(ServiceActivator.class, ArquillianServiceActivator.class, JBehaveContainerServiceActivator.class);
+		archive.addAsServiceProvider(ServiceActivator.class, JBehaveContainerServiceActivator.class);
 		return archive;
 	}
 

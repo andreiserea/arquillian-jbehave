@@ -16,7 +16,9 @@ import org.jboss.arquillian.core.api.annotation.Observes;
 import org.jboss.arquillian.jbehave.ExtendedState;
 import org.jboss.arquillian.jbehave.container.JBehaveProgressNotifier;
 import org.jboss.arquillian.jbehave.container.JBehaveProgressNotifierMXBean;
+import org.jboss.arquillian.junit.ArquillianJbehaveRunner;
 import org.jboss.arquillian.test.spi.event.suite.Test;
+import org.junit.runner.RunWith;
 
 public class JBehaveProgressNotifierClient {
 
@@ -24,17 +26,21 @@ public class JBehaveProgressNotifierClient {
 	private Instance<ProtocolMetaData> protocolMetadata;
 
 	public void nextStepNotifier(@Observes(precedence = Integer.MAX_VALUE) Test testEvent) {
-		Step step = (Step) ExtendedState.getProperty(ExtendedState.CRR_STEP);
-		@SuppressWarnings("unchecked")
-		List<String> storyPaths = (List<String>) ExtendedState.getProperty(ExtendedState.STORY_PATHS);
-		MBeanServerConnection mbeanServer = protocolMetadata.get().getContext(JMXContext.class).getConnection();
-		JBehaveProgressNotifierMXBean jBehaveProgressNotifier;
-		try {
-			jBehaveProgressNotifier = JMX.newMXBeanProxy(mbeanServer, new ObjectName(
-					JBehaveProgressNotifier.JBEHAVE_PROGRESS_NOTIFIER_NAME), JBehaveProgressNotifierMXBean.class);
-			jBehaveProgressNotifier.setNextStep(step.index(storyPaths));
-		} catch (MalformedObjectNameException e) {
-			e.printStackTrace();
+		RunWith runWith = testEvent.getTestClass().getAnnotation(RunWith.class);
+		if (ArquillianJbehaveRunner.class.isAssignableFrom(runWith.value())) {
+			Step step = (Step) ExtendedState.getProperty(ExtendedState.CRR_STEP);
+			
+			@SuppressWarnings("unchecked")
+			List<String> storyPaths = (List<String>) ExtendedState.getProperty(ExtendedState.STORY_PATHS);
+			MBeanServerConnection mbeanServer = protocolMetadata.get().getContext(JMXContext.class).getConnection();
+			JBehaveProgressNotifierMXBean jBehaveProgressNotifier;
+			try {
+				jBehaveProgressNotifier = JMX.newMXBeanProxy(mbeanServer, new ObjectName(
+						JBehaveProgressNotifier.JBEHAVE_PROGRESS_NOTIFIER_NAME), JBehaveProgressNotifierMXBean.class);
+				jBehaveProgressNotifier.setNextStep(step.index(storyPaths));
+			} catch (MalformedObjectNameException e) {
+				e.printStackTrace();
+			}
 		}
 	}
 }
